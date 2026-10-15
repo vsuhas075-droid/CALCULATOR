@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Calculator</title>
+  <style>
+:root {
+  --desk: #1e2b2f;
+  --shell: #2c3d42;
+  --lcd: #d6e2c4;
+  --lcd-ink: #1b2a1f;
+  --lcd-dim: #5d6f5c;
+  --key: #f0eee6;
+  --key-ink: #1f2a2e;
+  --fn: #a9b8bc;
+  --op: #6f93a3;
+  --op-ink: #0f1c20;
+  --equals: #e3a52f;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  display: grid;
+  place-items: center;
+  background: var(--desk);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  padding: 16px;
+}
+
+.calculator {
+  width: 100%;
+  max-width: 340px;
+  background: var(--shell);
+  border-radius: 22px;
+  padding: 18px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+}
+
+.screen {
+  background: var(--lcd);
+  color: var(--lcd-ink);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  min-height: 92px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-align: right;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.25);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  overflow: hidden;
+}
+
+.expression {
+  min-height: 1.2em;
+  font-size: 0.9rem;
+  color: var(--lcd-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.result {
+  font-size: 2.4rem;
+  font-weight: 600;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.result.small { font-size: 1.6rem; }
+.result.tiny  { font-size: 1.1rem; }
+
+.keys {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.key {
+  height: 60px;
+  border: 0;
+  border-radius: 12px;
+  font-size: 1.35rem;
+  font-weight: 500;
+  font-family: inherit;
+  background: var(--key);
+  color: var(--key-ink);
+  cursor: pointer;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.3);
+  transition: transform 0.06s ease, box-shadow 0.06s ease, filter 0.15s ease;
+}
+
+.key:hover { filter: brightness(1.06); }
+
+.key:active,
+.key.pressed {
+  transform: translateY(3px);
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0.3);
+}
+
+.key:focus-visible {
+  outline: 3px solid var(--equals);
+  outline-offset: 2px;
+}
+
+.key.fn     { background: var(--fn); }
+.key.op     { background: var(--op); color: var(--op-ink); font-size: 1.6rem; }
+.key.equals { background: var(--equals); color: #2a1d02; font-size: 1.6rem; }
+
+.key.op.active {
+  background: var(--key);
+  outline: 3px solid var(--op);
+  outline-offset: -3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .key { transition: none; }
+}
+</style>
+</head>
+<body>
+  <main class="calculator" aria-label="Calculator">
+    <div class="screen" aria-live="polite">
+      <div class="expression" id="expression"></div>
+      <div class="result" id="result">0</div>
+    </div>
+
+    <div class="keys">
+      <button class="key fn" data-action="clear">AC</button>
+      <button class="key fn" data-action="sign" aria-label="Toggle sign">+/−</button>
+      <button class="key fn" data-action="percent">%</button>
+      <button class="key op" data-action="operator" data-op="/" aria-label="Divide">÷</button>
+
+      <button class="key" data-digit="7">7</button>
+      <button class="key" data-digit="8">8</button>
+      <button class="key" data-digit="9">9</button>
+      <button class="key op" data-action="operator" data-op="*" aria-label="Multiply">×</button>
+
+      <button class="key" data-digit="4">4</button>
+      <button class="key" data-digit="5">5</button>
+      <button class="key" data-digit="6">6</button>
+      <button class="key op" data-action="operator" data-op="-" aria-label="Subtract">−</button>
+
+      <button class="key" data-digit="1">1</button>
+      <button class="key" data-digit="2">2</button>
+      <button class="key" data-digit="3">3</button>
+      <button class="key op" data-action="operator" data-op="+" aria-label="Add">+</button>
+
+      <button class="key" data-digit="0">0</button>
+      <button class="key" data-action="dot">.</button>
+      <button class="key fn" data-action="backspace" aria-label="Delete last digit">⌫</button>
+      <button class="key equals" data-action="equals" aria-label="Equals">=</button>
+    </div>
+  </main>
+
+  <script>
+const resultEl = document.getElementById("result");
+const expressionEl = document.getElementById("expression");
+const keysEl = document.querySelector(".keys");
+
+const SYMBOLS = { "+": "+", "-": "−", "*": "×", "/": "÷" };
+const MAX_DIGITS = 15;
+
+let current = "0";        // number being typed (or the last result), as a string
+let previous = null;      // first operand
+let operator = null;      // pending operator
+let awaiting = false;     // true right after an operator was pressed
+let justEvaluated = false;
+let hasError = false;
+
+/* ---------- helpers ---------- */
+
+function clean(n) {
+  // trims floating point noise, e.g. 0.1 + 0.2 -> 0.3
+  return parseFloat(n.toPrecision(12));
+}
+
+function format(str) {
+  if (str.includes("e")) return str;
+  const negative = str.startsWith("-");
+  const [int, dec] = str.replace("-", "").split(".");
+  const withCommas = int.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return (negative ? "-" : "") + withCommas + (dec !== undefined ? "." + dec : "");
+}
+
+function calculate(a, b, op) {
+  switch (op) {
+    case "+": return a + b;
+    case "-": return a - b;
+    case "*": return a * b;
+    case "/": return b === 0 ? null : a / b;
+  }
+}
+
+function showError(message) {
+  hasError = true;
+  current = message;
+  previous = null;
+  operator = null;
+  awaiting = false;
+  justEvaluated = false;
+  expressionEl.textContent = "";
+  render();
+}
+
+function render() {
+  const text = hasError ? current : format(current);
+  resultEl.textContent = text;
+  resultEl.classList.toggle("small", text.length > 10 && text.length <= 14);
+  resultEl.classList.toggle("tiny", text.length > 14);
+
+  document.querySelectorAll(".key.op").forEach((btn) => {
+    btn.classList.toggle("active", awaiting && btn.dataset.op === operator);
+  });
+}
+
+/* ---------- actions ---------- */
+
+function inputDigit(d) {
+  if (hasError) clearAll();
+  if (justEvaluated || awaiting) {
+    current = d;
+    justEvaluated = false;
+    awaiting = false;
+  } else if (current === "0") {
+    current = d;
+  } else if (current.replace(/[-.]/g, "").length < MAX_DIGITS) {
+    current += d;
+  }
+  render();
+}
+
+function inputDot() {
+  if (hasError) clearAll();
+  if (justEvaluated || awaiting) {
+    current = "0.";
+    justEvaluated = false;
+    awaiting = false;
+  } else if (!current.includes(".")) {
+    current += ".";
+  }
+  render();
+}
+
+function chooseOperator(op) {
+  if (hasError) return;
+
+  if (operator && awaiting) {          // just swap the operator
+    operator = op;
+  } else {
+    if (operator && !awaiting) {       // chain: 2 + 3 + ...
+      const result = calculate(previous, Number(current), operator);
+      if (result === null) return showError("Cannot divide by 0");
+      current = String(clean(result));
+    }
+    previous = Number(current);
+    operator = op;
+    awaiting = true;
+    justEvaluated = false;
+  }
+  expressionEl.textContent = `${format(String(previous))} ${SYMBOLS[operator]}`;
+  render();
+}
+
+function equals() {
+  if (hasError || operator === null) return;
+
+  const b = Number(current);
+  const result = calculate(previous, b, operator);
+  if (result === null) return showError("Cannot divide by 0");
+
+  expressionEl.textContent =
+    `${format(String(previous))} ${SYMBOLS[operator]} ${format(String(b))} =`;
+  current = String(clean(result));
+  previous = null;
+  operator = null;
+  awaiting = false;
+  justEvaluated = true;
+  render();
+}
+
+function percent() {
+  if (hasError) return;
+  current = String(clean(Number(current) / 100));
+  render();
+}
+
+function toggleSign() {
+  if (hasError || current === "0") return;
+  current = current.startsWith("-") ? current.slice(1) : "-" + current;
+  render();
+}
+
+function backspace() {
+  if (hasError) return clearAll();
+  if (justEvaluated || awaiting) return;
+  current = current.length > 1 && !(current.length === 2 && current.startsWith("-"))
+    ? current.slice(0, -1)
+    : "0";
+  render();
+}
+
+function clearAll() {
+  current = "0";
+  previous = null;
+  operator = null;
+  awaiting = false;
+  justEvaluated = false;
+  hasError = false;
+  expressionEl.textContent = "";
+  render();
+}
+
+/* ---------- events ---------- */
+
+keysEl.addEventListener("click", (e) => {
+  const btn = e.target.closest(".key");
+  if (!btn) return;
+
+  if (btn.dataset.digit !== undefined) return inputDigit(btn.dataset.digit);
+
+  switch (btn.dataset.action) {
+    case "dot":       return inputDot();
+    case "operator":  return chooseOperator(btn.dataset.op);
+    case "equals":    return equals();
+    case "percent":   return percent();
+    case "sign":      return toggleSign();
+    case "backspace": return backspace();
+    case "clear":     return clearAll();
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  const k = e.key;
+  let selector = null;
+
+  if (/^[0-9]$/.test(k)) { inputDigit(k); selector = `[data-digit="${k}"]`; }
+  else if (k === "." || k === ",") { inputDot(); selector = '[data-action="dot"]'; }
+  else if ("+-*/".includes(k)) { chooseOperator(k); selector = `[data-op="${k}"]`; }
+  else if (k === "Enter" || k === "=") { e.preventDefault(); equals(); selector = '[data-action="equals"]'; }
+  else if (k === "%") { percent(); selector = '[data-action="percent"]'; }
+  else if (k === "Backspace") { backspace(); selector = '[data-action="backspace"]'; }
+  else if (k === "Escape" || k === "Delete") { clearAll(); selector = '[data-action="clear"]'; }
+
+  if (selector) {
+    const btn = document.querySelector(selector);
+    if (btn) {
+      btn.classList.add("pressed");
+      setTimeout(() => btn.classList.remove("pressed"), 100);
+    }
+  }
+});
+
+render();
+</script>
+</body>
+</html>
